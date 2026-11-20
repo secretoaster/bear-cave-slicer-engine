@@ -1,0 +1,85 @@
+# Builds bcslice for Android (arm64) and Linux, then slices the three sample models on Linux.
+# The built programs and test G-code are attached to each run (Actions > run > Artifacts).
+name: Build
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [android, linux]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 340
+    env:
+      TARGET: ${{ matrix.target }}
+      CCACHE_DIR: /home/runner/.ccache
+      CMAKE_C_COMPILER_LAUNCHER: ccache
+      CMAKE_CXX_COMPILER_LAUNCHER: ccache
+    steps:
+      - uses: actions/checkout@v5
+      - name: Tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq ninja-build ccache autoconf automake libtool texinfo m4 zlib1g-dev unzip >/dev/null
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> $GITHUB_ENV
+      - name: Restore libraries
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/bc-deps-${{ matrix.target }}/prefix
+          key: deps-${{ matrix.target }}-${{ hashFiles('deps.sh') }}-${{ github.run_id }}
+          restore-keys: deps-${{ matrix.target }}-${{ hashFiles('deps.sh') }}-
+      - name: Restore compiler cache
+        uses: actions/cache/restore@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ matrix.target }}-${{ github.run_id }}
+          restore-keys: ccache-${{ matrix.target }}-
+      - name: Build libraries
+        run: bash deps.sh
+      - name: Save libraries
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/bc-deps-${{ matrix.target }}/prefix
+          key: deps-${{ matrix.target }}-${{ hashFiles('deps.sh') }}-${{ github.run_id }}
+      - name: Build engine and bcslice
+        run: |
+          ccache -M 3G >/dev/null
+          JOBS=3 bash build.sh
+      - name: Save compiler cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: /home/runner/.ccache
+          key: ccache-${{ matrix.target }}-${{ github.run_id }}
+      - name: Presets and test slices
+        if: matrix.target == 'linux'
+        run: |
+          python3 flatten.py $HOME/es-src/resources/profiles/Elegoo $HOME/out/presets
+          P=$HOME/out/presets
+          for m in ElegooToleranceTest.stl Stanford_Bunny.3mf Elegoo_stringhell.3mf; do
+            $HOME/out/bcslice-linux --resources $P \
+              --machine "$P/machine/Elegoo Centauri Carbon 2 0.4 nozzle.json" \
+              --process "$P/process/0.20mm Standard @Elegoo CC2 0.4 nozzle.json" \
+              --filament "$P/filament/Elegoo PLA @ECC2.json" \
+              --json $HOME/out/${m%.*}.json --preview $HOME/out/${m%.*}.png \
+              -o $HOME/out/${m%.*}.gcode "$HOME/es-src/resources/handy_models/$m"
+            cat $HOME/out/${m%.*}.json; echo
+          done
+      - name: Strip
+        run: |
+          if [ "$TARGET" = android ]; then $ANDROID_NDK_HOME/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-strip $HOME/out/bcslice-android; else strip $HOME/out/bcslice-linux; fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bcslice-${{ matrix.target }}
+          path: |
+            ~/out/bcslice-*
+            ~/out/*.gcode
+            ~/out/*.json
+            ~/out/*.png
+          if-no-files-found: warn
