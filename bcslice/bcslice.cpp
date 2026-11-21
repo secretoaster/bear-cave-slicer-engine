@@ -10,7 +10,7 @@
 // Prints "PROGRESS <percent> <text>" lines while it works, and writes a small
 // JSON report (time taken, peak memory, print estimate) at the end.
 //
-// Copyright (C) 2026 Sung Hong / Bear Cave Labs. Built with Claude.
+// Copyright (C) 2026 Design202, LLC (Bear Cave Labs). Built with Claude.
 // Licensed under the GNU AGPL v3, like ElegooSlicer, which this uses.
 
 #include "libslic3r/libslic3r.h"

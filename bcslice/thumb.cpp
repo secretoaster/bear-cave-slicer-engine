@@ -2,7 +2,7 @@
 // and the preview in the phone app. No GPU: a small z-buffer rasteriser with flat shading,
 // drawn twice the size and shrunk for smooth edges.
 //
-// Copyright (C) 2026 Sung Hong / Bear Cave Labs. Built with Claude. AGPL v3.
+// Copyright (C) 2026 Design202, LLC (Bear Cave Labs). Built with Claude. AGPL v3.
 
 #include "thumb.hpp"
 

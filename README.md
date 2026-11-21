@@ -4,7 +4,7 @@ The real ElegooSlicer slicing engine, built to run on Android phones and tablets
 It turns a 3MF or STL into G-code for the Elegoo Centauri Carbon 2 on the phone itself,
 with no computer and no cloud. It is the slicer inside the **Bear Cave Printer** app.
 
-By **Sung Hong / Bear Cave Labs** (Design202, LLC), built with Claude.
+By **Bear Cave Labs** (Design202, LLC), built with Claude.
 Based on [ElegooSlicer](https://github.com/ELEGOO-3D/ElegooSlicer), which comes from
 OrcaSlicer, Bambu Studio and PrusaSlicer. Not made by or affiliated with Elegoo.
 

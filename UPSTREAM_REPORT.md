@@ -65,4 +65,4 @@ because the GUI sets the origin.
 After the six fixes a full slice reports none, apart from reads inside TBB's own allocator
 (tbbmalloc), which Valgrind can't follow. Repeat slices give byte-identical G-code.
 
-Reported by Sung Hong (Bear Cave Labs), found with Claude.
+Reported by Bear Cave Labs (Design202, LLC), found with Claude.
