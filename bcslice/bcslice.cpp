@@ -10,7 +10,7 @@
 // Prints "PROGRESS <percent> <text>" lines while it works, and writes a small
 // JSON report (time taken, peak memory, print estimate) at the end.
 //
-// Copyright (C) 2026 Design202, LLC (Bear Cave Labs). Built with Claude.
+// Copyright (C) 2026 Design202, LLC (Bear Cave Labs)..
 // Licensed under the GNU AGPL v3, like ElegooSlicer, which this uses.
 
 #include "libslic3r/libslic3r.h"
@@ -23,6 +23,7 @@
 #include "libslic3r/Utils.hpp"
 #include "libslic3r/Arrange.hpp"
 #include "libslic3r/ModelArrange.hpp"
+#include "libslic3r/Format/STL.hpp"
 #include "thumb.hpp"
 
 #include <tbb/global_control.h>
@@ -71,6 +72,10 @@ struct Args {
     std::string machine, process, filament, input, output, json, tmp, bed, resources, preview, colour;
     int plate = 0;
     int threads = 0;
+    std::string mesh;                     // --mesh out.stl: write the part's shape for the 3D view, no slicing
+    std::vector<std::string> sets;        // --set key=value: the phone's options on top of the presets
+    bool rotate = false;                  // --rotate w,x,y,z: turn the part on the bed (a quaternion, Z up)
+    double q[4] = {1, 0, 0, 0};
 };
 
 static int fail(const Args &a, int code, const std::string &msg)
@@ -140,23 +145,30 @@ static int run(int argc, char **argv)
         else if (k == "--preview") a.preview = next();
         else if (k == "--color") a.colour = next();
         else if (k == "-o" || k == "--output") a.output = next();
+        else if (k == "--mesh") a.mesh = next();
+        else if (k == "--set") a.sets.push_back(next());
+        else if (k == "--rotate") {
+            std::string v = next();
+            a.rotate = std::sscanf(v.c_str(), "%lf,%lf,%lf,%lf", &a.q[0], &a.q[1], &a.q[2], &a.q[3]) == 4;
+        }
         else if (k == "--version") { std::cout << "bcslice 1 on " << SLIC3R_APP_NAME << " " << SLIC3R_VERSION << std::endl; return 0; }
         else a.input = k;
     }
-    if (a.machine.empty() || a.process.empty() || a.filament.empty() || a.input.empty() || a.output.empty()) {
+    if (a.machine.empty() || a.process.empty() || a.filament.empty() || a.input.empty() || (a.output.empty() && a.mesh.empty())) {
         std::cerr << "usage: bcslice --machine m.json --process p.json --filament f.json [--plate N] [--bed TYPE] [--tmp DIR] [--resources DIR] [--threads N] [--json out.json] -o out.gcode model.3mf" << std::endl;
         return 1;
     }
 
     // the engine needs full paths (it creates the output's folder)
-    a.output = fs::absolute(a.output).string();
+    if (!a.output.empty()) a.output = fs::absolute(a.output).string();
+    if (!a.mesh.empty()) a.mesh = fs::absolute(a.mesh).string();
     a.input = fs::absolute(a.input).string();
     if (!a.json.empty()) a.json = fs::absolute(a.json).string();
     if (!a.preview.empty()) a.preview = fs::absolute(a.preview).string();
     auto t0 = std::chrono::steady_clock::now();
     auto secs = [&]() { return std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count(); };
 
-    std::string tmp = a.tmp.empty() ? (fs::path(a.output).parent_path() / "bcslice_tmp").string() : a.tmp;
+    std::string tmp = a.tmp.empty() ? (fs::path(a.output.empty() ? a.mesh : a.output).parent_path() / "bcslice_tmp").string() : a.tmp;
     fs::create_directories(tmp);
     set_temporary_dir(tmp);
     set_data_dir(tmp);
@@ -171,6 +183,15 @@ static int run(int argc, char **argv)
     if (!load_preset(a.machine, config, err, &mname) || !load_preset(a.process, config, err, &pname) ||
         !load_preset(a.filament, config, err, &fname, &fid))
         return fail(a, 2, err);
+    // the phone's options (supports, infill, walls, brim) on top of the presets
+    for (const std::string &kv : a.sets) {
+        size_t eq = kv.find('=');
+        if (eq == std::string::npos || eq == 0) return fail(a, 2, "bad --set " + kv);
+        try {
+            ConfigSubstitutionContext ctx(ForwardCompatibilitySubstitutionRule::Enable);
+            config.set_deserialize(kv.substr(0, eq), kv.substr(eq + 1), ctx);
+        } catch (const std::exception &e) { return fail(a, 2, "can't set " + kv + ": " + e.what()); }
+    }
     // record which presets made this, like ElegooSlicer does
     config.set_key_value("printer_settings_id", new ConfigOptionString(mname));
     config.set_key_value("print_settings_id", new ConfigOptionString(pname));
@@ -241,13 +262,45 @@ static int run(int argc, char **argv)
         }
     }
 
+    // a project file can carry its own per-part settings; the phone's options win
+    for (const std::string &kv : a.sets) {
+        std::string key = kv.substr(0, kv.find('='));
+        for (ModelObject *mo : model.objects) {
+            mo->config.erase(key);
+            for (ModelVolume *mv : mo->volumes) mv->config.erase(key);
+        }
+    }
+
+    // ---- shape only, for the phone's 3D view: placed as the file has it, no slicing
+    if (!a.mesh.empty()) {
+        for (ModelObject *mo : model.objects) mo->ensure_on_bed();
+        if (!store_stl(a.mesh.c_str(), &model, true)) return fail(a, 5, "can't write the shape");
+        if (!a.json.empty()) { std::ofstream j(a.json); j << "{\"ok\":true,\"mesh\":\"" << json_escape(a.mesh) << "\",\"peakMB\":" << peak_mb() << "}\n"; }
+        std::cout << "PROGRESS 100 Shape ready" << std::endl;
+        return 0;
+    }
+
+    // ---- turned on the bed by the phone (same turn for every part, about its own center)
+    if (a.rotate) {
+        Eigen::Quaterniond qr(a.q[0], a.q[1], a.q[2], a.q[3]);
+        if (qr.norm() > 1e-9) {
+            qr.normalize();
+            Matrix3d R = qr.toRotationMatrix();
+            for (ModelObject *mo : model.objects) {
+                for (ModelInstance *mi : mo->instances) mi->rotate(R);
+                mo->invalidate_bounding_box();
+            }
+            std::cout << "PROGRESS 9 Turned on the bed" << std::endl;
+        } else a.rotate = false;
+    }
+
     // ---- placement: loose files go in the middle of the bed; anything that
     // ended up off our bed (a bigger printer's plate) is moved to the middle too
     for (ModelObject *mo : model.objects) mo->ensure_on_bed();
     BoundingBoxf3 bb = model.bounding_box_exact();
     BoundingBoxf ours(Vec2d(0, 0), our_bed);
     bool off_bed = bb.min.x() < -0.5 || bb.min.y() < -0.5 || bb.max.x() > our_bed.x() + 0.5 || bb.max.y() > our_bed.y() + 0.5;
-    if (!is_3mf || off_bed) {
+    if (!is_3mf || off_bed || a.rotate) {
         // Same arrange step ElegooSlicer runs on loose files, so the part lands in the same spot.
         bool arranged = false;
         try {
