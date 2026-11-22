@@ -1,0 +1,21 @@
+apply plugin: 'com.android.application'
+
+android {
+    namespace 'com.design218.slicetest'
+    compileSdk 36
+    defaultConfig {
+        applicationId 'com.bearcavelabs.slicerchecker'
+        minSdk 28
+        targetSdk 36
+        versionCode 5
+        versionName '1.0'
+        ndk { abiFilters 'arm64-v8a' }
+    }
+    // Sign release builds with your own key (not included here).
+    buildTypes {
+        release { minifyEnabled false }
+    }
+    // bcslice runs as its own program, so it must be unpacked on install
+    packagingOptions { jniLibs { useLegacyPackaging true } }
+    androidResources { noCompress 'json', 'stl', '3mf' }
+}

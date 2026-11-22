@@ -79,3 +79,7 @@ Tested on a Samsung Galaxy S24 Ultra (Snapdragon 8 Gen 3):
 GNU Affero General Public License v3.0, the same as ElegooSlicer. See `LICENSE`.
 Copyright © 2026 Design202, LLC (Bear Cave Labs) for the changes and the `bcslice` program;
 ElegooSlicer and its sources keep their own copyrights.
+
+## Bear Cave Slicer Checker
+
+`checker/` is the free Android app that runs this engine on a phone or tablet and says whether it can slice. See `checker/README.md`.
